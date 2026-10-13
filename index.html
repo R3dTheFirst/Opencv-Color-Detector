@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Camera Color Detector</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #eff3ee;
+      --muted: #98a49f;
+      --line: #293532;
+      --panel: #121a18;
+      --canvas: #080d0c;
+      --mint: #9be4c2;
+      --lime: #d3ed91;
+      --coral: #ef977d;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      min-width: 320px;
+      min-height: 100vh;
+      margin: 0;
+      color: var(--ink);
+      background-color: #0b100f;
+      background-image: radial-gradient(#25332e 0.7px, transparent 0.7px);
+      background-size: 18px 18px;
+      font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    button { font: inherit; }
+
+    .app-shell {
+      width: min(1440px, 100%);
+      min-height: 100vh;
+      margin: 0 auto;
+      padding: 0 28px 28px;
+    }
+
+    header {
+      height: 76px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-mark {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--mint);
+      color: var(--mint);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    h1 { margin: 0; font-size: 14px; font-weight: 600; }
+    .eyebrow { color: var(--muted); font-size: 10px; letter-spacing: 0; }
+
+    .connection {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--coral);
+      box-shadow: 0 0 12px #ef977d66;
+    }
+
+    .connection[data-state="live"] .status-dot {
+      background: var(--mint);
+      box-shadow: 0 0 12px #9be4c288;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 280px;
+      gap: 22px;
+      padding-top: 24px;
+    }
+
+    .viewer-column { min-width: 0; }
+    .viewer-heading {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    h2 { margin: 0; font-size: 16px; font-weight: 500; }
+    .source { color: var(--muted); font-size: 10px; }
+
+    .feed-frame {
+      position: relative;
+      display: grid;
+      min-height: 300px;
+      height: min(72vh, 760px);
+      place-items: center;
+      overflow: hidden;
+      border: 1px solid #34443e;
+      background: var(--canvas);
+      box-shadow: 0 16px 54px #0008;
+    }
+
+    .feed-frame::before, .feed-frame::after {
+      position: absolute;
+      z-index: 2;
+      width: 18px;
+      height: 18px;
+      content: "";
+      pointer-events: none;
+    }
+
+    .feed-frame::before {
+      inset: 8px auto auto 8px;
+      border-top: 1px solid var(--mint);
+      border-left: 1px solid var(--mint);
+    }
+
+    .feed-frame::after {
+      inset: auto 8px 8px auto;
+      border-right: 1px solid var(--mint);
+      border-bottom: 1px solid var(--mint);
+    }
+
+    #video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      cursor: crosshair;
+    }
+
+    #video[hidden] { display: none; }
+
+    #feed-message {
+      position: absolute;
+      max-width: 420px;
+      padding: 24px;
+      color: var(--muted);
+      text-align: center;
+      font-size: 12px;
+    }
+
+    #feed-message strong {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--coral);
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    #sample-marker {
+      position: absolute;
+      z-index: 3;
+      display: none;
+      border: 1px solid var(--lime);
+      border-radius: 50%;
+      box-shadow: 0 0 0 1px #101512, 0 0 14px #d3ed9180;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+
+    .viewer-footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding-top: 11px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .sidebar {
+      padding-top: 32px;
+      border-left: 1px solid var(--line);
+    }
+
+    .readout { padding: 0 0 20px 20px; border-bottom: 1px solid var(--line); }
+    .section-label { color: var(--muted); font-size: 10px; text-transform: uppercase; }
+
+    .swatch {
+      height: 116px;
+      margin: 14px 0 17px;
+      border: 1px solid #ffffff24;
+      background: repeating-conic-gradient(#17201d 0% 25%, #101614 0% 50%) 50% / 16px 16px;
+      transition: background-color 160ms ease;
+    }
+
+    .hex-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    #hex-value { font-size: 25px; font-weight: 600; }
+
+    #copy-button {
+      padding: 7px 9px;
+      border: 1px solid #43534c;
+      background: #18211e;
+      color: var(--ink);
+      cursor: pointer;
+    }
+
+    #copy-button:hover { border-color: var(--mint); }
+
+    .channels { display: grid; gap: 10px; margin-top: 20px; }
+    .channel { display: grid; grid-template-columns: 32px 1fr 38px; align-items: center; gap: 9px; font-size: 11px; }
+    .channel-name { color: var(--muted); }
+    .meter { height: 4px; background: #26312d; }
+    .meter-fill { width: 0; height: 100%; background: var(--mint); transition: width 160ms ease; }
+    .channel:nth-child(2) .meter-fill { background: #d3ed91; }
+    .channel:nth-child(3) .meter-fill { background: #ef977d; }
+    .channel-value { text-align: right; font-variant-numeric: tabular-nums; }
+
+    .sample-info { padding: 19px 0 0 20px; color: var(--muted); font-size: 10px; }
+    .sample-info p { margin: 0 0 7px; }
+    #coordinates { color: var(--ink); }
+
+    @media (max-width: 760px) {
+      .app-shell { padding: 0 16px 20px; }
+      header { height: 64px; }
+      main { grid-template-columns: minmax(0, 1fr); gap: 16px; padding-top: 18px; }
+      .feed-frame { height: min(58vh, 560px); min-height: 250px; }
+      .sidebar { display: grid; grid-template-columns: 1fr 1fr; padding-top: 16px; border-top: 1px solid var(--line); border-left: 0; }
+      .readout { padding: 0 16px 0 0; border-right: 1px solid var(--line); border-bottom: 0; }
+      .swatch { height: 76px; }
+      #hex-value { font-size: 21px; }
+      .sample-info { padding: 0 0 0 16px; }
+      .viewer-footer { flex-wrap: wrap; }
+    }
+
+    @media (max-width: 420px) {
+      .source { max-width: 145px; overflow-wrap: anywhere; text-align: right; }
+      .connection { font-size: 0; }
+      .sidebar { grid-template-columns: 1fr; gap: 18px; }
+      .readout { padding: 0 0 16px; border-right: 0; border-bottom: 1px solid var(--line); }
+      .sample-info { padding: 0; }
+      .swatch { height: 66px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header>
+      <div class="brand">
+        <div class="brand-mark">RGB</div>
+        <div>
+          <h1>Camera Color Detector</h1>
+          <div class="eyebrow">LIVE FRAME ANALYSIS</div>
+        </div>
+      </div>
+      <div class="connection" id="connection" data-state="waiting">
+        <span class="status-dot"></span>
+        <span id="connection-label">Connecting to camera</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="viewer-column" aria-label="Camera feed">
+        <div class="viewer-heading">
+          <h2>Camera feed</h2>
+          <span class="source">10.236.0.22 : 4747</span>
+        </div>
+        <div class="feed-frame" id="feed-frame">
+          <img id="video" src="/video" alt="Live camera feed" hidden>
+          <div id="feed-message" role="status">
+            <strong id="feed-title">Waiting for video</strong>
+            <span id="feed-detail">Opening the DroidCam stream.</span>
+          </div>
+          <div id="sample-marker" aria-hidden="true"></div>
+        </div>
+        <div class="viewer-footer">
+          <span>Click any point to sample its surrounding 40 px circle</span>
+          <span id="frame-size">FRAME -- x --</span>
+        </div>
+      </section>
+
+      <aside class="sidebar" aria-label="Color sample">
+        <section class="readout">
+          <div class="section-label">Average sample</div>
+          <div class="swatch" id="swatch"></div>
+          <div class="hex-row">
+            <strong id="hex-value">--</strong>
+            <button id="copy-button" type="button" disabled>Copy hex</button>
+          </div>
+          <div class="channels">
+            <div class="channel"><span class="channel-name">RED</span><div class="meter"><div class="meter-fill" id="red-meter"></div></div><span class="channel-value" id="red-value">---</span></div>
+            <div class="channel"><span class="channel-name">GREEN</span><div class="meter"><div class="meter-fill" id="green-meter"></div></div><span class="channel-value" id="green-value">---</span></div>
+            <div class="channel"><span class="channel-name">BLUE</span><div class="meter"><div class="meter-fill" id="blue-meter"></div></div><span class="channel-value" id="blue-value">---</span></div>
+          </div>
+        </section>
+        <section class="sample-info">
+          <div class="section-label">Sample details</div>
+          <p id="coordinates">No point selected</p>
+          <p>40 px diameter · circle average</p>
+          <p id="pixel-count">Source-frame pixels</p>
+        </section>
+      </aside>
+    </main>
+  </div>
+  <canvas id="sampler" hidden></canvas>
+
+  <script>
+    const video = document.querySelector("#video");
+    const connection = document.querySelector("#connection");
+    const connectionLabel = document.querySelector("#connection-label");
+    const feedMessage = document.querySelector("#feed-message");
+    const sampleMarker = document.querySelector("#sample-marker");
+    const sampler = document.querySelector("#sampler");
+    const context = sampler.getContext("2d", { willReadFrequently: true });
+    const sampleRadius = 20;
+
+    function setConnection(state, label) {
+      connection.dataset.state = state;
+      connectionLabel.textContent = label;
+    }
+
+    video.addEventListener("load", () => {
+      video.hidden = false;
+      feedMessage.hidden = true;
+      setConnection("live", "Live feed");
+      document.querySelector("#frame-size").textContent =
+        `FRAME ${video.naturalWidth} x ${video.naturalHeight}`;
+    });
+
+    video.addEventListener("error", () => {
+      video.hidden = true;
+      feedMessage.hidden = false;
+      document.querySelector("#feed-title").textContent = "Camera unavailable";
+      document.querySelector("#feed-detail").textContent =
+        "Check that DroidCam is running, is not in use by another app, and is reachable at 10.236.0.22:4747.";
+      setConnection("error", "No video stream");
+    });
+
+    function imageLayout() {
+      const bounds = video.getBoundingClientRect();
+      const scale = Math.min(bounds.width / video.naturalWidth, bounds.height / video.naturalHeight);
+      const width = video.naturalWidth * scale;
+      const height = video.naturalHeight * scale;
+      return {
+        bounds,
+        scale,
+        left: (bounds.width - width) / 2,
+        top: (bounds.height - height) / 2,
+        width,
+        height,
+      };
+    }
+
+    video.addEventListener("click", (event) => {
+      if (!video.naturalWidth || !video.naturalHeight) return;
+
+      const layout = imageLayout();
+      const displayedX = event.clientX - layout.bounds.left - layout.left;
+      const displayedY = event.clientY - layout.bounds.top - layout.top;
+      if (displayedX < 0 || displayedY < 0 || displayedX >= layout.width || displayedY >= layout.height) return;
+
+      const centerX = Math.floor(displayedX / layout.scale);
+      const centerY = Math.floor(displayedY / layout.scale);
+      sampler.width = video.naturalWidth;
+      sampler.height = video.naturalHeight;
+      context.drawImage(video, 0, 0);
+
+      const left = Math.max(0, centerX - sampleRadius);
+      const top = Math.max(0, centerY - sampleRadius);
+      const right = Math.min(video.naturalWidth, centerX + sampleRadius + 1);
+      const bottom = Math.min(video.naturalHeight, centerY + sampleRadius + 1);
+      const pixels = context.getImageData(left, top, right - left, bottom - top).data;
+      let red = 0;
+      let green = 0;
+      let blue = 0;
+      let count = 0;
+
+      for (let y = top; y < bottom; y++) {
+        for (let x = left; x < right; x++) {
+          const dx = x - centerX;
+          const dy = y - centerY;
+          if (dx * dx + dy * dy > sampleRadius * sampleRadius) continue;
+          const index = ((y - top) * (right - left) + (x - left)) * 4;
+          red += pixels[index];
+          green += pixels[index + 1];
+          blue += pixels[index + 2];
+          count++;
+        }
+      }
+
+      red = Math.round(red / count);
+      green = Math.round(green / count);
+      blue = Math.round(blue / count);
+      const hex = `#${[red, green, blue].map((value) => value.toString(16).padStart(2, "0")).join("")}`.toUpperCase();
+
+      document.querySelector("#swatch").style.background = hex;
+      document.querySelector("#hex-value").textContent = hex;
+      document.querySelector("#copy-button").disabled = false;
+      [["red", red], ["green", green], ["blue", blue]].forEach(([channel, value]) => {
+        document.querySelector(`#${channel}-value`).textContent = String(value).padStart(3, "0");
+        document.querySelector(`#${channel}-meter`).style.width = `${value / 2.55}%`;
+      });
+      document.querySelector("#coordinates").textContent = `Frame point: ${centerX}, ${centerY}`;
+      document.querySelector("#pixel-count").textContent = `${count} px averaged`;
+
+      sampleMarker.style.display = "block";
+      sampleMarker.style.left = `${layout.left + (centerX + 0.5) * layout.scale}px`;
+      sampleMarker.style.top = `${layout.top + (centerY + 0.5) * layout.scale}px`;
+      sampleMarker.style.width = `${sampleRadius * 2 * layout.scale}px`;
+      sampleMarker.style.height = `${sampleRadius * 2 * layout.scale}px`;
+    });
+
+    document.querySelector("#copy-button").addEventListener("click", async () => {
+      const hex = document.querySelector("#hex-value").textContent;
+      try {
+        await navigator.clipboard.writeText(hex);
+        document.querySelector("#copy-button").textContent = "Copied";
+        window.setTimeout(() => { document.querySelector("#copy-button").textContent = "Copy hex"; }, 1200);
+      } catch {
+        document.querySelector("#copy-button").textContent = "Copy blocked";
+      }
+    });
+  </script>
+</body>
+</html>
