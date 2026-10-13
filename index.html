@@ -171,6 +171,23 @@
       pointer-events: none;
     }
 
+    #grid-markers {
+      position: absolute;
+      z-index: 2;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    #grid-markers[hidden] { display: none; }
+
+    .grid-marker {
+      position: absolute;
+      border: 1px solid var(--coral);
+      border-radius: 50%;
+      box-shadow: 0 0 0 1px #101512, 0 0 12px #ef977d75;
+      transform: translate(-50%, -50%);
+    }
+
     .viewer-footer {
       display: flex;
       justify-content: space-between;
@@ -179,6 +196,28 @@
       color: var(--muted);
       font-size: 10px;
     }
+
+    .batch-controls {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding-top: 16px;
+    }
+
+    #sample-grid-button, #toggle-grid-button {
+      min-height: 38px;
+      padding: 0 13px;
+      border: 1px solid #53675d;
+      background: #17241f;
+      color: var(--ink);
+      cursor: pointer;
+    }
+
+    #sample-grid-button { border-color: var(--mint); }
+    #sample-grid-button:hover:not(:disabled), #toggle-grid-button:hover:not(:disabled) { background: #22352d; }
+    #sample-grid-button:disabled, #toggle-grid-button:disabled { border-color: #34413b; color: #77817c; cursor: not-allowed; }
+    #grid-status { color: var(--muted); font-size: 10px; }
 
     .sidebar {
       padding-top: 32px;
@@ -273,11 +312,17 @@
             <strong id="feed-title">Waiting for video</strong>
             <span id="feed-detail">Opening the DroidCam stream.</span>
           </div>
+          <div id="grid-markers" aria-hidden="true"></div>
           <div id="sample-marker" aria-hidden="true"></div>
         </div>
         <div class="viewer-footer">
-          <span>Click any point to sample its surrounding 40 px circle</span>
+          <span>Click any point to sample its surrounding 50 px circle</span>
           <span id="frame-size">FRAME -- x --</span>
+        </div>
+        <div class="batch-controls">
+          <button id="sample-grid-button" type="button" disabled>Sample 24 Points + CSV</button>
+          <button id="toggle-grid-button" type="button" aria-pressed="true" disabled>Hide sample circles</button>
+          <span id="grid-status" role="status">Waiting for live camera</span>
         </div>
       </section>
 
@@ -298,7 +343,7 @@
         <section class="sample-info">
           <div class="section-label">Sample details</div>
           <p id="coordinates">No point selected</p>
-          <p>40 px diameter · circle average</p>
+          <p>50 px diameter · circle average</p>
           <p id="pixel-count">Source-frame pixels</p>
         </section>
       </aside>
@@ -311,10 +356,19 @@
     const connection = document.querySelector("#connection");
     const connectionLabel = document.querySelector("#connection-label");
     const feedMessage = document.querySelector("#feed-message");
+    const feedFrame = document.querySelector("#feed-frame");
+    const gridMarkers = document.querySelector("#grid-markers");
     const sampleMarker = document.querySelector("#sample-marker");
     const sampler = document.querySelector("#sampler");
     const context = sampler.getContext("2d", { willReadFrequently: true });
-    const sampleRadius = 20;
+    const sampleGridButton = document.querySelector("#sample-grid-button");
+    const toggleGridButton = document.querySelector("#toggle-grid-button");
+    const gridStatus = document.querySelector("#grid-status");
+    const sampleRadius = 25;
+    const gridPoints = Array.from({ length: 24 }, (_, index) => ({
+      x: 180 + (index % 6) * 150,
+      y: 160 + Math.floor(index / 6) * 150,
+    }));
 
     function setConnection(state, label) {
       connection.dataset.state = state;
@@ -325,8 +379,13 @@
       video.hidden = false;
       feedMessage.hidden = true;
       setConnection("live", "Live feed");
+      sampleGridButton.disabled = false;
+      toggleGridButton.disabled = false;
+      gridMarkers.hidden = toggleGridButton.getAttribute("aria-pressed") !== "true";
+      gridStatus.textContent = "Ready to sample";
       document.querySelector("#frame-size").textContent =
         `FRAME ${video.naturalWidth} x ${video.naturalHeight}`;
+      renderGridMarkers();
     });
 
     video.addEventListener("error", () => {
@@ -336,7 +395,90 @@
       document.querySelector("#feed-detail").textContent =
         "Check that DroidCam is running, is not in use by another app, and is reachable at 10.236.0.22:4747.";
       setConnection("error", "No video stream");
+      sampleGridButton.disabled = true;
+      toggleGridButton.disabled = true;
+      gridMarkers.hidden = true;
+      gridStatus.textContent = "Camera unavailable";
     });
+
+    function renderGridMarkers() {
+      if (!video.naturalWidth || !video.naturalHeight) return;
+
+      const layout = imageLayout();
+      const frameBounds = feedFrame.getBoundingClientRect();
+      const offsetX = layout.bounds.left - frameBounds.left - feedFrame.clientLeft + layout.left;
+      const offsetY = layout.bounds.top - frameBounds.top - feedFrame.clientTop + layout.top;
+      gridMarkers.replaceChildren();
+      for (const point of gridPoints) {
+        if (point.x >= video.naturalWidth || point.y >= video.naturalHeight) continue;
+        const marker = document.createElement("span");
+        marker.className = "grid-marker";
+        marker.style.left = `${offsetX + (point.x + 0.5) * layout.scale}px`;
+        marker.style.top = `${offsetY + (point.y + 0.5) * layout.scale}px`;
+        marker.style.width = `${sampleRadius * 2 * layout.scale}px`;
+        marker.style.height = `${sampleRadius * 2 * layout.scale}px`;
+        gridMarkers.append(marker);
+      }
+    }
+
+    window.addEventListener("resize", renderGridMarkers);
+
+    toggleGridButton.addEventListener("click", () => {
+      const showMarkers = toggleGridButton.getAttribute("aria-pressed") !== "true";
+      toggleGridButton.setAttribute("aria-pressed", String(showMarkers));
+      toggleGridButton.textContent = showMarkers ? "Hide sample circles" : "Show sample circles";
+      gridMarkers.hidden = !showMarkers;
+    });
+
+    function sampleCircle(centerX, centerY) {
+      const left = Math.max(0, centerX - sampleRadius);
+      const top = Math.max(0, centerY - sampleRadius);
+      const right = Math.min(video.naturalWidth, centerX + sampleRadius + 1);
+      const bottom = Math.min(video.naturalHeight, centerY + sampleRadius + 1);
+      const pixels = context.getImageData(left, top, right - left, bottom - top).data;
+      let red = 0;
+      let green = 0;
+      let blue = 0;
+      let count = 0;
+
+      for (let y = top; y < bottom; y++) {
+        for (let x = left; x < right; x++) {
+          const dx = x - centerX;
+          const dy = y - centerY;
+          if (dx * dx + dy * dy > sampleRadius * sampleRadius) continue;
+          const index = ((y - top) * (right - left) + (x - left)) * 4;
+          red += pixels[index];
+          green += pixels[index + 1];
+          blue += pixels[index + 2];
+          count++;
+        }
+      }
+
+      red = Math.round(red / count);
+      green = Math.round(green / count);
+      blue = Math.round(blue / count);
+      const hex = `#${[red, green, blue].map((value) => value.toString(16).padStart(2, "0")).join("")}`.toUpperCase();
+      return { red, green, blue, hex, count };
+    }
+
+    function displaySample(centerX, centerY, sample) {
+      const layout = imageLayout();
+      document.querySelector("#swatch").style.background = sample.hex;
+      document.querySelector("#hex-value").textContent = sample.hex;
+      document.querySelector("#copy-button").disabled = false;
+      [["red", sample.red], ["green", sample.green], ["blue", sample.blue]].forEach(([channel, value]) => {
+        document.querySelector(`#${channel}-value`).textContent = String(value).padStart(3, "0");
+        document.querySelector(`#${channel}-meter`).style.width = `${value / 2.55}%`;
+      });
+      document.querySelector("#coordinates").textContent = `Frame point: ${centerX}, ${centerY}`;
+      document.querySelector("#pixel-count").textContent = `${sample.count} px averaged`;
+
+      sampleMarker.style.display = "block";
+      sampleMarker.style.left = `${layout.left + (centerX + 0.5) * layout.scale}px`;
+      sampleMarker.style.top = `${layout.top + (centerY + 0.5) * layout.scale}px`;
+      sampleMarker.style.width = `${sampleRadius * 2 * layout.scale}px`;
+      sampleMarker.style.height = `${sampleRadius * 2 * layout.scale}px`;
+    }
 
     function imageLayout() {
       const bounds = video.getBoundingClientRect();
@@ -366,50 +508,45 @@
       sampler.width = video.naturalWidth;
       sampler.height = video.naturalHeight;
       context.drawImage(video, 0, 0);
+      displaySample(centerX, centerY, sampleCircle(centerX, centerY));
+    });
 
-      const left = Math.max(0, centerX - sampleRadius);
-      const top = Math.max(0, centerY - sampleRadius);
-      const right = Math.min(video.naturalWidth, centerX + sampleRadius + 1);
-      const bottom = Math.min(video.naturalHeight, centerY + sampleRadius + 1);
-      const pixels = context.getImageData(left, top, right - left, bottom - top).data;
-      let red = 0;
-      let green = 0;
-      let blue = 0;
-      let count = 0;
-
-      for (let y = top; y < bottom; y++) {
-        for (let x = left; x < right; x++) {
-          const dx = x - centerX;
-          const dy = y - centerY;
-          if (dx * dx + dy * dy > sampleRadius * sampleRadius) continue;
-          const index = ((y - top) * (right - left) + (x - left)) * 4;
-          red += pixels[index];
-          green += pixels[index + 1];
-          blue += pixels[index + 2];
-          count++;
-        }
+    sampleGridButton.addEventListener("click", () => {
+      if (!video.naturalWidth || !video.naturalHeight) return;
+      const lastPoint = gridPoints[gridPoints.length - 1];
+      if (lastPoint.x >= video.naturalWidth || lastPoint.y >= video.naturalHeight) {
+        gridStatus.textContent = `Frame too small for x=${lastPoint.x}, y=${lastPoint.y}`;
+        return;
       }
 
-      red = Math.round(red / count);
-      green = Math.round(green / count);
-      blue = Math.round(blue / count);
-      const hex = `#${[red, green, blue].map((value) => value.toString(16).padStart(2, "0")).join("")}`.toUpperCase();
+      sampleGridButton.disabled = true;
+      gridStatus.textContent = "Sampling 24 points...";
+      try {
+        sampler.width = video.naturalWidth;
+        sampler.height = video.naturalHeight;
+        context.drawImage(video, 0, 0);
+        const samples = gridPoints.map(({ x, y }) => ({ x, y, ...sampleCircle(x, y) }));
+        const rows = [
+          "x,y,r,g,b,hex,pixels_averaged",
+          ...samples.map(({ x, y, red, green, blue, hex, count }) =>
+            `${x},${y},${red},${green},${blue},${hex},${count}`),
+        ];
+        const csv = new Blob([rows.join("\r\n")], { type: "text/csv;charset=utf-8" });
+        const downloadUrl = URL.createObjectURL(csv);
+        const downloadLink = document.createElement("a");
+        downloadLink.href = downloadUrl;
+        downloadLink.download = "camera-color-grid.csv";
+        downloadLink.click();
+        window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
 
-      document.querySelector("#swatch").style.background = hex;
-      document.querySelector("#hex-value").textContent = hex;
-      document.querySelector("#copy-button").disabled = false;
-      [["red", red], ["green", green], ["blue", blue]].forEach(([channel, value]) => {
-        document.querySelector(`#${channel}-value`).textContent = String(value).padStart(3, "0");
-        document.querySelector(`#${channel}-meter`).style.width = `${value / 2.55}%`;
-      });
-      document.querySelector("#coordinates").textContent = `Frame point: ${centerX}, ${centerY}`;
-      document.querySelector("#pixel-count").textContent = `${count} px averaged`;
-
-      sampleMarker.style.display = "block";
-      sampleMarker.style.left = `${layout.left + (centerX + 0.5) * layout.scale}px`;
-      sampleMarker.style.top = `${layout.top + (centerY + 0.5) * layout.scale}px`;
-      sampleMarker.style.width = `${sampleRadius * 2 * layout.scale}px`;
-      sampleMarker.style.height = `${sampleRadius * 2 * layout.scale}px`;
+        const lastSample = samples[samples.length - 1];
+        displaySample(lastSample.x, lastSample.y, lastSample);
+        gridStatus.textContent = "Saved 24 RGB samples to camera-color-grid.csv";
+      } catch (error) {
+        gridStatus.textContent = `Sampling failed: ${error.message}`;
+      } finally {
+        sampleGridButton.disabled = false;
+      }
     });
 
     document.querySelector("#copy-button").addEventListener("click", async () => {
